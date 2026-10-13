@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "ModbusTCP.h"
+#include <stdio.h>
 
 #define MBAP_SIZE 7     // tamanho do cabecalho MBAP
 #define APDU_MAX  253   // tamanho maximo de um APDU
@@ -63,6 +64,7 @@ static int connect_server(char *server_add, int port)
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     if (connect(fd, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        perror("DEBUG connect");
         close(fd);
         return -1;
     }
@@ -97,18 +99,25 @@ int Send_Modbus_request(char *server_add, int port, uint8_t *APDU, int APDUlen, 
     if (fd < 0) return -1;
 
     // 4. enviar o pedido
-    if (send_all(fd, PDU, MBAP_SIZE + APDUlen) == 0 &&
-        // 5. ler os 7 bytes do MBAP da resposta
-        recv_all(fd, MBAP_R, MBAP_SIZE) == 0 &&
-        // 6. o TI tem de ser o do pedido e o Protocol ID tem de ser 0
-        MBAP_R[0] == PDU[0] && MBAP_R[1] == PDU[1] &&
-        MBAP_R[2] == 0 && MBAP_R[3] == 0) {
-
-        // 7. Length - 1 = tamanho do APDU de resposta
+    if (send_all(fd, PDU, MBAP_SIZE + APDUlen) < 0) {
+        perror("DEBUG send");
+    }
+    // 5. ler o MBAP da resposta
+    else if (recv_all(fd, MBAP_R, MBAP_SIZE) < 0) {
+        perror("DEBUG recv MBAP (sem resposta)");
+    }
+    // 6. confirmar TI e Protocol ID
+    else if (MBAP_R[0] != PDU[0] || MBAP_R[1] != PDU[1] || MBAP_R[2] != 0 || MBAP_R[3] != 0) {
+        printf("DEBUG MBAP errado: %02X %02X %02X %02X %02X %02X %02X\n",
+               MBAP_R[0], MBAP_R[1], MBAP_R[2], MBAP_R[3], MBAP_R[4], MBAP_R[5], MBAP_R[6]);
+    }
+    else {
+        // 7. tamanho do APDU de resposta
         len = ((MBAP_R[4] << 8) | MBAP_R[5]) - 1;
-
-        // 8. ler o APDU de resposta
-        if (len >= 1 && len <= APDU_MAX && recv_all(fd, APDU_R, len) == 0)
+        // 8. ler o APDU
+        if (len < 1 || len > APDU_MAX || recv_all(fd, APDU_R, len) < 0)
+            printf("DEBUG APDU de resposta invalido (len = %d)\n", len);
+        else
             ret = 0;
     }
 
