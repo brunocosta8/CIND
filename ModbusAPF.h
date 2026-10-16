@@ -2,7 +2,7 @@
 #define MODBUSAP_H
 #include <stdint.h>
  
-#define UNIT_ID   15          // Unit ID do servidor: muda aqui quando precisares
+#define UNIT_ID   7          // Unit ID do servidor: muda aqui quando precisares
  
 // Codigos de erro (sempre negativos)
 //   -1 a -11 : excecao Modbus enviada pelo servidor (-codigo da excecao)

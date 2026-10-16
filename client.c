@@ -1,55 +1,122 @@
 #include <stdio.h>
-#include "ModbusAP.h"
+#include <unistd.h>
+#include "ModbusTCPF.h"
+#include "ModbusAPF.h"
 
 #define SERVER1 "127.0.0.1"
 #define SERVER2 "10.227.113.101"
 #define PORT    502
 
-// O enunciado usa offsets (a comecar em 0) e a biblioteca usa o numero
-// da coil (a comecar em 1), por isso soma-se 1 a cada endereco.
-#define COIL(offset) ((offset) + 1)
-
-// Converte o retorno da biblioteca no resultado pedido pelo enunciado:
-//   0 se correu bem, X > 0 se foi excecao Modbus, -1 nos outros erros.
 static int resultado(int r)
 {
-    if (r >= 0) return 0;                                    // sucesso
+    if (r >= 0) return 0;                       // correu bem          -> 0
     if (r == MB_ERR_PARAM || r == MB_ERR_COMM || r == MB_ERR_RESP)
-        return -1;                                           // erro nao Modbus
-    return -r;                                               // excecao: -X passa a X
+        return -1;                              // -100/-101/-102      -> -1
+    return -r;                                  // -2 -> 2, -1 -> 1, ...
 }
 
 int main(void)
 {
-    uint8_t W[8] = {1, 0, 1, 0, 0, 1, 1, 0};
-    uint8_t A[10], B, C[10];
-    int i, res;
+    uint8_t escrever[4] = {1,1,0,1}; //escrever o que quisermos inicialmente
+    uint8_t dados[1] = {0};    //buffer para meter o primeiros dados
+    uint8_t lido[2];           //buffer para ler
+    uint8_t A[10];             //array necessário
+    uint8_t B=0;                //variavel que lemos
+    uint8_t C[10];              //array para escrever
+    uint8_t dados2[2] = {0};    //buffer para escrever a seguir
+    int i, r;   
+    int n_uns = 0; 
+    uint8_t D=0;                //variavel para escrevr
 
-    // 1. escrever W nas coils 120 a 127
-    res = resultado(Write_coils(SERVER1, PORT, COIL(120), 8, W));
+    //ligação TCP
+    int sock = ModbusTCP_Connect(SERVER1, PORT);
+    if (sock < 0) {
+        printf("Resultado= %d\n", MB_ERR_COMM);
+        return 1;
+    }
 
-    // 2. ler as coils 130 a 139 para A
-    if (res == 0)
-        res = resultado(Read_coils(SERVER1, PORT, COIL(130), 10, A));
+    // empacotar as coils: coil i vai no bit i (o primeiro e o menos significativo)
+    for (i = 0; i < 4; i++)
+        if (escrever[i]) dados[0] |= 1 << i;
 
-    // 3. ler a coil 140 para B
-    if (res == 0)
-        res = resultado(Read_coils(SERVER1, PORT, COIL(140), 1, &B));
+    //escrever as coils com 2 de offset e 4 coils
+    r = resultado(ModbusAP_WriteMultipleCoils_Req(sock, 2, 4, dados));
+    printf("Escrita: %d\n", r);
 
-    // calcular C
-    if (res == 0)
+    //ler as coils com 6 de offset e 10 coils
+    if(r==0)
+    {
+        r = resultado(ModbusAP_ReadCoils_Req(sock, 6, 10, lido));
+        printf("Leitura: %d", r);
+        if (r == 0) {
+            printf(" ->");
+            for (i = 0; i < 10; i++)
+            {
+                printf(" %d", (lido[i / 8] >> (i % 8)) & 1);
+                A[i] = (lido[i / 8] >> (i % 8)) & 1; //passar o buufer lido para o array A
+
+                /*A[i] = (lido[i / 8] >> (i % 8)) & 1;
+                printf(" %d", A[i]);*/
+            }
+        }
+
+        printf("\n");
+    }
+
+    //ler somente uma coil
+    if(r==0)
+    {
+        r = resultado(ModbusAP_ReadCoils_Req(sock, 16, 1, lido));   
+        printf("Leitura B: %d", r);
+        if (r == 0) {
+            B = lido[0] & 1;    //passar o buffer lido para a variavel B                          
+            printf(" -> B = %d", B);
+        }
+        printf("\n");
+
+        if(B==0)
+        {
+            for(int z=0;z<10;z++)
+            {
+                C[z]=A[z];
+            }
+        }else if(B==1)
+        {
+            for(int z=0;z<10;z++)
+            {
+                C[z]=!A[z];
+            }
+        }
+    }
+
+    //empacotar as coils no buffer dados2
+    if(r==0)
+    {
         for (i = 0; i < 10; i++)
-            C[i] = (B == 0) ? 1 : !A[i];
+            if (C[i]) dados2[i / 8] |= 1 << (i % 8);
 
-    // 4. escrever C nas coils 150 a 159 do servidor 1
-    if (res == 0)
-        res = resultado(Write_coils(SERVER1, PORT, COIL(150), 10, C));
+        //escrever dados2 com offset 20 e 10 coils
+        r = resultado(ModbusAP_WriteMultipleCoils_Req(sock, 20, 10, dados2));
+        printf("Escrita: %d\n", r);
 
-    // 5. escrever C nas coils 160 a 169 do servidor 2
-    if (res == 0)
-        res = resultado(Write_coils(SERVER2, PORT, COIL(160), 10, C));
+        
+        for (i = 0; i < 10; i++) {
+            n_uns += A[i];
+        }
 
-    // 6. resultado final
-    printf("result = %d\n", res);
+        if(n_uns>=5)
+        {
+            D=1;
+        }
+    }
+
+        //escrever 1 coil
+    if(r==0)
+    {
+        r = resultado(ModbusAP_WriteMultipleCoils_Req(sock, 0, 1, &D));
+        printf("Escrita D: %d\n", r);
+    }
+    printf("resultado-%d",r);
+        close(sock);
     return 0;
 }
