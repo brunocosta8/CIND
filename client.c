@@ -4,8 +4,9 @@
 #include "ModbusAPF.h"
 
 #define SERVER1 "127.0.0.1"
-#define SERVER2 "10.227.113.101"
-#define PORT    502
+#define SERVER2 "127.0.0.1"     
+#define PORT1   502
+#define PORT2   502
 
 static int resultado(int r)
 {
@@ -29,7 +30,7 @@ int main(void)
     uint8_t D=0;                //variavel para escrevr
 
     //ligação TCP
-    int sock = ModbusTCP_Connect(SERVER1, PORT);
+    int sock = ModbusTCP_Connect(SERVER1, PORT1);
     if (sock < 0) {
         printf("Resultado= %d\n", MB_ERR_COMM);
         return 1;
@@ -110,13 +111,21 @@ int main(void)
         }
     }
 
-        //escrever 1 coil
-    if(r==0)
-    {
-        r = resultado(ModbusAP_WriteMultipleCoils_Req(sock, 0, 1, &D));
-        printf("Escrita D: %d\n", r);
+    close(sock);                                       // fim do servidor 1
+
+    // abrir servidor 2
+    if (r == 0) {
+        sock = ModbusTCP_Connect(SERVER2, PORT2);
+        if (sock < 0) {
+            r = -1;                                    // não ligou: erro não Modbus
+        } else {
+            r = resultado(ModbusAP_WriteMultipleCoils_Req(sock, 0, 1, &D));
+            printf("Escrita D: %d\n", r);              // escrever 1 coil
+            close(sock);
+        }
     }
-    printf("resultado-%d",r);
-        close(sock);
+
+    printf("result = %d\n", r);
     return 0;
+
 }
